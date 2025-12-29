@@ -1,78 +1,144 @@
-# Node.js Authorization Bypass Demo (TypeScript)
+# Proving the Vulnerability (vulnerable branch)
 
-Hands-on demo of a common **authorization bypass** pattern with JWTs, plus a straightforward remediation. Use this to teach or validate access-control fixes.
+like string with a role claim will be trusted.  
+Example exploit using a real signed token (recommended for a more realistic demo):
 
-## Contents
-- [Quick Start](#quick-start)
-- [Learning Goals](#learning-goals)
-- [Vulnerability Scenario](#vulnerability-scenario)
-- [Secure Fix](#secure-fix)
-- [Project Structure](#project-structure)
-- [Scripts](#scripts)
-- [Tooling](#tooling)
-- [Next Steps](#next-steps)
-- [Author](#author)
+1) Create a token for a normal user (example route):  
+   `curl http://localhost:3000/login/100`
 
-## Quick Start
-```bash
-npm install
-npm run dev     # run the TypeScript demo with ts-node
-npm run build   # emit compiled JS to dist/
-npm start       # run the compiled build
-npm test        # placeholder (wire up your preferred test runner)
+2) Forge a new token with role=admin and sub=100 using the repo's secret (see scripts/forge-admin-token.ts if present).
+
+3) Call /admin with the forged token:  
+   `curl -H "Authorization: Bearer <FORGED_TOKEN>" http://localhost:3000/admin`
+
+Expected result on vulnerable: HTTP 200  
+Note: If you keep jwt.decode() on vulnerable, you can also demonstrate the risk of accepting unverified tokens. If you want a cleaner ‘AuthN succeeds, AuthZ fails’ story, change vulnerable to jwt.verify() but still trust payload.role.
+
+3) Run the fixed branch (same exploit should fail)  
+Checkout main and start the server:  
+`git checkout main`  
+`npm run dev`
+
+Re-run the exact same exploit request you used on the vulnerable branch.  
+`curl -H "Authorization: Bearer <FORGED_TOKEN>" http://localhost:3000/admin`
+
+Expected result on main: HTTP 403 (or 401 if the token is invalid)
+
+## Prerequisites
+
+- Node.js 18+
+- npm
+
+## Proving the Vulnerability (vulnerable branch)
+
+### Step 1 — Run the vulnerable branch
+`git checkout vulnerable`  
+`npm run dev`
+
+Confirm the app is running (adjust port if needed):  
+`curl http://localhost:3000/health`
+
+### Step 2 — Create a normal user token
+Use the demo login route to mint a token for a non-admin user:  
+`curl http://localhost:3000/login/100`  
+Copy the returned JWT.
+
+### Step 3 — Forge a token with elevated privileges
+Modify the token payload to include an admin role.  
+Example (recommended: real signed token using the repo secret):
+
+```ts
+// scripts/forge-admin-token.ts
+import jwt from "jsonwebtoken";
+
+const secret = process.env.JWT_SECRET || "dev-secret-change-me";
+const forged = jwt.sign(
+  { role: "admin" },
+  secret,
+  { subject: "100", expiresIn: "1h" }
+);
+
+console.log(forged);
 ```
-Prereqs: Node.js 18+ and npm.
 
-## Learning Goals
-- See how **AuthN** (authentication) can succeed while **AuthZ** (authorization) fails.
-- Understand why trusting JWT claims (e.g., `role`) is dangerous.
-- Learn to move authorization checks to server-side, authoritative data.
+Run:  
+`npx ts-node scripts/forge-admin-token.ts`  
+Copy the forged token.
 
-## Vulnerability Scenario
-- Accepts a signed JWT.
-- Trusts the `role` claim from the token.
-- Uses that role directly for access decisions.
+### Step 4 — Access the admin endpoint
+`curl -H "Authorization: Bearer <FORGED_TOKEN>" \`  
+`  http://localhost:3000/admin`
 
-Attack path:
-1) User gets a valid “basic” token.  
-2) Attacker edits the payload to set `"role": "admin"`.  
-3) Server grants admin access because it trusts the claim.
+Expected result on vulnerable:  
+HTTP 200 OK  
+Admin access is granted because the application trusts the role claim from the token.
 
-## Secure Fix
-- Treat token claims as **untrusted input**.
-- Verify the token signature and algorithm.
-- Use only the `sub` (subject) from the token.
-- Fetch roles/permissions from server-side data (not from the client).
+## Notes on the Vulnerable Design
+
+- If the vulnerable branch uses jwt.decode(), this also demonstrates the danger of accepting unverified tokens.
+- For a cleaner, more realistic AppSec narrative, the vulnerable branch can instead:
+  - verify the JWT signature
+  - still trust payload.role for authorization
+- In both cases, the core issue is client-controlled authorization data.
+
+## Secure Fix (main branch)
+
+### Step 5 — Run the fixed branch
+`git checkout main`  
+`npm run dev`
+
+Re-run the exact same request using the forged token:  
+`curl -H "Authorization: Bearer <FORGED_TOKEN>" \`  
+`  http://localhost:3000/admin`
+
+Expected result on main:  
+HTTP 403 Forbidden  
+(or 401 Unauthorized if the token is invalid)
+
+## Why the Fix Works
+
+The fixed implementation:
+- verifies the JWT signature and algorithm
+- uses only sub (user id) from the token
+- loads roles from server-authoritative data
+- treats all token claims as untrusted input
+
+Authorization decisions are enforced exclusively on the server.
 
 ## Project Structure
-- `src/app.ts` — demo entrypoint.
-- `src/auth/jwt.ts` — token helpers (stubbed, replace with a real JWT lib).
-- `src/auth/middleware.ts` — simple authorization gate.
-- `src/routes/admin.ts` — admin route sample.
-- `src/routes/profile.ts` — profile route sample.
-- `src/data/users.ts` — mock user store.
-- `tests/auth.test.ts` — placeholder for your test suite.
-- `.github/workflows/ci.yml` — GitHub Actions pipeline.
-- `.semgrep.yml` — placeholder SAST rule; replace with real checks.
 
-## Scripts
-- `npm run dev` — run TypeScript directly via ts-node.
-- `npm run build` — compile to `dist/`.
-- `npm start` — run the compiled build.
-- `npm test` — currently a placeholder; add Jest/Vitest and real specs.
+- src/app.ts — application entrypoint
+- src/auth/jwt.ts — JWT helpers
+- src/auth/middleware.ts — authorization logic
+- src/routes/admin.ts — protected admin route
+- src/routes/profile.ts — example user route
+- src/data/users.ts — server-authoritative user store
+- tests/ — regression tests validating access control
+- .github/workflows/ci.yml — CI pipeline
+- .semgrep.yml — SAST guardrails
 
-## Tooling
-- TypeScript for typing and safer refactors.
-- GitHub Actions CI (`.github/workflows/ci.yml`).
-- Semgrep config stub (`.semgrep.yml`); customize with project rules.
+## Testing & Guardrails
 
-## Next Steps
-- Swap the stubbed JWT code for a production library (e.g., `jsonwebtoken`).
-- Back authorization with a datastore and enforce roles server-side.
-- Add real regression tests for AuthZ, including negative cases.
-- Expand Semgrep rules to block risky patterns (trusting client claims).
+Regression tests ensure:
+- normal users cannot access admin routes
+- token tampering does not grant elevated privileges
+- legitimate admins retain access
+
+CI enforces these guarantees on every change.
+
+## Key Takeaway
+
+Authorization bugs are rarely cryptographic failures.  
+They happen when trust is placed in the wrong place.  
+This project demonstrates how Application Security:
+- identifies flawed trust boundaries
+- fixes them at the design level
+- prevents recurrence through tests and automation
 
 ## Author
-Chris Heintzelman — Application Security Engineer  
+
+Chris Heintzelman  
+Application Security Engineer  
 GitHub: https://github.com/cheintzelman141
+
 
