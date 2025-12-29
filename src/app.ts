@@ -1,8 +1,8 @@
 import express from "express";
 import adminRoutes from "./routes/admin";
 import { signToken } from "./auth/jwt";
-// vulnerable: authVulnerable, fixed: authFixed
-import { authFixed as auth } from "./auth/middleware";
+// vulnerable branch: intentionally use the vulnerable middleware
+import { authVulnerable as auth } from "./auth/middleware";
 
 const app = express();
 app.use(express.json());
