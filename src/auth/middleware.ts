@@ -1,27 +1,18 @@
 import { Request, Response, NextFunction } from "express";
-import jwt, { JwtPayload } from "jsonwebtoken";
-import { JWT_SECRET } from "./jwt";
-import { USERS } from "../data/users";
+import jwt from "jsonwebtoken";
 
-export function authFixed(req: Request, res: Response, next: NextFunction) {
+export function authVulnerable(req: Request, res: Response, next: NextFunction) {
   const header = req.header("authorization");
   if (!header?.startsWith("Bearer ")) return res.status(401).json({ error: "Missing token" });
 
   const token = header.slice("Bearer ".length);
 
-  try {
-    const verified = jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] }) as JwtPayload;
+  // ❌ BUG: decodes without verifying signature
+  const payload: any = jwt.decode(token);
 
-    const userId = verified.sub;
-    if (!userId || typeof userId !== "string") return res.status(401).json({ error: "Invalid sub" });
+  if (!payload) return res.status(401).json({ error: "Invalid token" });
 
-    const user = USERS[userId];
-    if (!user) return res.status(401).json({ error: "Unknown user" });
-
-    // ✅ Authoritative role comes from server-side data, not token claims
-    (req as any).user = { id: user.id, role: user.role };
-    return next();
-  } catch {
-    return res.status(401).json({ error: "Invalid token" });
-  }
+  // ❌ BUG: trusts client-controlled role claim
+  (req as any).user = { id: "unknown", role: payload.role || "user" };
+  next();
 }
