@@ -1,0 +1,7 @@
+rules:
+  - id: example-placeholder
+    patterns:
+      - pattern: 1 == 1
+    message: "Placeholder Semgrep rule. Update with project-specific checks."
+    severity: INFO
+
